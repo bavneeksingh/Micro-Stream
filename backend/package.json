@@ -12,9 +12,17 @@
   },
   "dependencies": {
     "@microstream/shared": "*",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/pg": "^8.23.1",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.7.1",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.23.1",
+    "pg-mem": "^3.0.14",
     "zod": "^3.24.2"
   },
   "devDependencies": {
