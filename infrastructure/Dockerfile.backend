@@ -1,0 +1,37 @@
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy root workspace manifests
+COPY package*.json ./
+COPY shared/package*.json ./shared/
+COPY backend/package*.json ./backend/
+
+# Install dependencies across workspaces
+RUN npm install
+
+# Copy source files
+COPY shared/ ./shared/
+COPY backend/ ./backend/
+
+# Build shared package and backend
+RUN npm run build -w shared
+RUN npm run build -w backend
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=4000
+
+COPY package*.json ./
+COPY shared/package*.json ./shared/
+COPY backend/package*.json ./backend/
+
+RUN npm install --omit=dev
+
+COPY --from=builder /app/shared/dist ./shared/dist
+COPY --from=builder /app/backend/dist ./backend/dist
+
+EXPOSE 4000
+CMD ["npm", "run", "start", "-w", "backend"]
