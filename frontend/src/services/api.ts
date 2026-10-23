@@ -170,6 +170,53 @@ export const api = {
     return fetchJson<{ events: any[]; total: number }>(`/audit${qs}`);
   },
 
+  // Deterministic Repayment Engine & Transaction History
+  getTransactionHistory: (params?: { workerId?: string; limit?: number; offset?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.workerId) q.set('workerId', params.workerId);
+    if (params?.limit) q.set('limit', params.limit.toString());
+    if (params?.offset) q.set('offset', params.offset.toString());
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return fetchJson<{ transactions: any[]; total: number }>(`/transactions/history${qs}`);
+  },
+
+  getEngineConfig: () =>
+    fetchJson<{
+      defaultRepaymentRateBps: number;
+      defaultDailyCapPaise: number;
+      minimumDeductionThresholdPaise: number;
+      maxRetries: number;
+    }>('/engine/config'),
+
+  updateEngineConfig: (config: {
+    repaymentRateBasisPoints?: number;
+    dailyCapPaise?: number;
+    minimumDeductionThresholdPaise?: number;
+    retryLimit?: number;
+  }) =>
+    fetchJson<any>('/engine/config', {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    }),
+
+  retryDebitInstruction: (instructionId: string) =>
+    fetchJson<any>(`/debits/${instructionId}/retry`, {
+      method: 'POST',
+    }),
+
+  sendPaymentCallback: (payload: {
+    instructionId: string;
+    reference: string;
+    amountPaise: number;
+    success: boolean;
+    upiRef?: string;
+    failureReason?: string;
+  }) =>
+    fetchJson<any>('/payments/callback', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
   resetDemoStore: async () => {
     try {
       return await fetchJson<any>('/stream/reset', { method: 'POST' });

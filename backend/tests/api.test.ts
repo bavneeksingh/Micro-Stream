@@ -223,8 +223,9 @@ describe('MicroStream PostgreSQL Backend API Tests', () => {
         amountPaise: 50000,
         reference: uniqueRef,
       });
-    expect(res2.status).toBe(409);
-    expect(res2.body.code).toBe('DUPLICATE_KEY');
+    expect(res2.status).toBe(200);
+    expect(res2.body.message).toContain('Duplicate payout reference acknowledged safely');
+    expect(res2.body.debitInstruction.id).toBe(res1.body.debitInstruction.id);
   });
 
   // 6. Lender Portfolio & Risk Assessment

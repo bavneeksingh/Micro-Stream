@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   TrendingUp,
@@ -14,6 +14,10 @@ import {
   Coins,
   ChevronRight,
   ExternalLink,
+  RefreshCw,
+  AlertCircle,
+  ArrowRight,
+  Layers,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -29,10 +33,44 @@ import { useApp } from '../context/AppContext.js';
 import { MetricCard } from '../components/MetricCard.js';
 import { StatusBadge } from '../components/StatusBadge.js';
 import { SimulatePayoutModal } from '../components/SimulatePayoutModal.js';
+import { api } from '../services/api.js';
 
 export const WorkerDashboard: React.FC = () => {
   const { activeWorker, activeLoan, activeMandate, earnings, repayments } = useApp();
   const [showSimulateModal, setShowSimulateModal] = useState(false);
+  const [liveTransactions, setLiveTransactions] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+
+  const fetchLiveHistory = async () => {
+    setLoadingHistory(true);
+    try {
+      const res = await api.getTransactionHistory({ workerId: activeWorker?.userId });
+      if (res && res.transactions) {
+        setLiveTransactions(res.transactions);
+      }
+    } catch (err) {
+      console.warn('Backend live transaction history fetch failed:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLiveHistory();
+  }, [activeWorker?.userId, activeWorker?.did]);
+
+  const handleRetryDebit = async (instructionId: string) => {
+    setRetryingId(instructionId);
+    try {
+      await api.retryDebitInstruction(instructionId);
+      await fetchLiveHistory();
+    } catch (err: any) {
+      alert(`Retry failed: ${err.message}`);
+    } finally {
+      setRetryingId(null);
+    }
+  };
 
   // Filter earnings & repayments for active worker
   const workerEarnings = earnings.filter((e) => e.did === activeWorker?.did);
@@ -333,48 +371,134 @@ export const WorkerDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Recent Transaction History */}
+        {/* Deterministic Repayment Engine Lifecycle History */}
         <div className="bg-white rounded-2xl p-6 border border-slate-200/90 shadow-card space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-                Recent Repayment Activity
-              </h3>
-              <p className="text-xs text-slate-500">
-                Verified micro-deductions credited directly to your loan balance.
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-1.5">
+                  <Zap className="w-4 h-4 text-teal-600" />
+                  <span>Deterministic Repayment Stream</span>
+                </h3>
+                <span className="text-[10px] font-mono px-2 py-0.5 bg-teal-50 text-teal-700 rounded-md font-semibold border border-teal-200">
+                  Rate: {activeLoan ? `${activeLoan.deductionRateBps / 100}%` : '5.0%'} (500 bps)
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Atomic state machine: Payout (RECEIVED/PROCESSED) &rarr; Debit (SUCCEEDED/RETRY_PENDING) &rarr; Repayment
               </p>
             </div>
-            <NavLink
-              to="/repayments"
-              className="text-xs font-bold text-teal-700 hover:text-teal-800 flex items-center gap-1"
-            >
-              <span>All Debits</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </NavLink>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={fetchLiveHistory}
+                disabled={loadingHistory}
+                className="p-1.5 text-slate-500 hover:text-teal-600 hover:bg-slate-100 rounded-lg transition"
+                title="Refresh transaction stream"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingHistory ? 'animate-spin' : ''}`} />
+              </button>
+              <NavLink
+                to="/repayments"
+                className="text-xs font-bold text-teal-700 hover:text-teal-800 flex items-center gap-1"
+              >
+                <span>Full Ledger</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </NavLink>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[11px]">
-                  <th className="py-2.5 px-3">Date</th>
-                  <th className="py-2.5 px-3">Deducted</th>
+                <tr className="border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[10px]">
+                  <th className="py-2.5 px-3">Payout Ref / State</th>
+                  <th className="py-2.5 px-3">Gross Payout</th>
+                  <th className="py-2.5 px-3">Debit Instruction</th>
+                  <th className="py-2.5 px-3">Deduction (INR)</th>
                   <th className="py-2.5 px-3">Balance After</th>
-                  <th className="py-2.5 px-3">UPI Ref</th>
+                  <th className="py-2.5 px-3 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {workerRepayments.length === 0 ? (
+                {liveTransactions.length > 0 ? (
+                  liveTransactions.slice(0, 6).map((tx) => (
+                    <tr key={tx.payout_id || tx.instruction_id || Math.random()} className="hover:bg-slate-50/80 transition">
+                      <td className="py-2.5 px-3">
+                        <div className="font-mono text-[11px] font-semibold text-slate-800 truncate max-w-[120px]">
+                          {tx.payout_reference}
+                        </div>
+                        <div className="mt-0.5">
+                          <StatusBadge status={tx.payout_status || 'PROCESSED'} size="sm" />
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 font-semibold text-slate-900">
+                        ₹{(Number(tx.payout_amount_paise) / 100).toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <div className="font-mono text-[11px] text-slate-600 truncate max-w-[110px]">
+                          {tx.instruction_id ? tx.instruction_id.slice(0, 14) + '...' : 'N/A'}
+                        </div>
+                        <div className="mt-0.5">
+                          <StatusBadge status={tx.debit_status || 'PENDING'} size="sm" />
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 font-bold text-teal-700">
+                        ₹{tx.repayment_amount_paise !== null && tx.repayment_amount_paise !== undefined
+                          ? (Number(tx.repayment_amount_paise) / 100).toFixed(2)
+                          : (Number(tx.debit_amount_paise || 0) / 100).toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 font-semibold text-slate-800">
+                        {tx.outstanding_balance_after !== null && tx.outstanding_balance_after !== undefined
+                          ? `₹${(Number(tx.outstanding_balance_after) / 100).toFixed(2)}`
+                          : (tx.debit_status === 'SUCCEEDED' ? '₹0.00' : 'Unchanged')}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        {tx.debit_status === 'RETRY_PENDING' ? (
+                          <button
+                            onClick={() => handleRetryDebit(tx.instruction_id)}
+                            disabled={retryingId === tx.instruction_id}
+                            className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg text-[10px] transition shadow-sm inline-flex items-center gap-1"
+                          >
+                            <RefreshCw className={`w-2.5 h-2.5 ${retryingId === tx.instruction_id ? 'animate-spin' : ''}`} />
+                            <span>Retry</span>
+                          </button>
+                        ) : tx.debit_status === 'SUCCEEDED' ? (
+                          <span className="text-[10px] font-semibold text-teal-700 bg-teal-50 px-2 py-0.5 rounded">
+                            Settled
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">Synced</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                ) : workerRepayments.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-8 text-center text-slate-400">
+                    <td colSpan={6} className="py-8 text-center text-slate-400">
                       No repayments recorded yet. Use the Simulate button to stream your first deduction.
                     </td>
                   </tr>
                 ) : (
                   workerRepayments.slice(0, 5).map((rep) => (
                     <tr key={rep.id} className="hover:bg-slate-50/80 transition">
-                      <td className="py-2.5 px-3 font-mono text-slate-600">
-                        {rep.settledAt ? rep.settledAt.slice(0, 10) : 'Recent'}
+                      <td className="py-2.5 px-3">
+                        <div className="font-mono text-[11px] font-semibold text-slate-800 truncate max-w-[120px]">
+                          {rep.upiRef}
+                        </div>
+                        <div className="mt-0.5">
+                          <StatusBadge status="PROCESSED" size="sm" />
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 font-semibold text-slate-900">
+                        ₹{(rep.amountPaise * 20 / 100).toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <div className="font-mono text-[11px] text-slate-600 truncate max-w-[110px]">
+                          {rep.debitInstructionId}
+                        </div>
+                        <div className="mt-0.5">
+                          <StatusBadge status="SUCCEEDED" size="sm" />
+                        </div>
                       </td>
                       <td className="py-2.5 px-3 font-bold text-teal-700">
                         ₹{(rep.amountPaise / 100).toFixed(2)}
@@ -382,8 +506,10 @@ export const WorkerDashboard: React.FC = () => {
                       <td className="py-2.5 px-3 text-slate-800 font-semibold">
                         ₹{(rep.newOutstandingBalancePaise / 100).toFixed(2)}
                       </td>
-                      <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">
-                        {rep.upiRef}
+                      <td className="py-2.5 px-3 text-right">
+                        <span className="text-[10px] font-semibold text-teal-700 bg-teal-50 px-2 py-0.5 rounded">
+                          Settled
+                        </span>
                       </td>
                     </tr>
                   ))

@@ -72,15 +72,14 @@ export function createApp() {
   // GET /api/lender/portfolio, GET /api/lender/workers/:workerId/risk
   app.use('/api/lender', createLenderRoutes());
 
-  // Payouts & Real-Time Streaming Simulator
+  // Payouts & Deterministic Repayment Engine
   // GET /api/payouts, POST /api/simulator/payouts, POST /api/payouts/simulate
   const payoutRoutes = createPayoutRoutes();
   app.use('/api/payouts', payoutRoutes);
-  app.use('/api/simulator/payouts', (req, res, next) => {
-    // Forward /api/simulator/payouts to the simulator handler inside payoutRoutes
-    req.url = '/simulator/payouts';
-    payoutRoutes(req, res, next);
-  });
+  app.use('/api/simulator', payoutRoutes);
+  app.use('/api/payments', payoutRoutes);
+  app.use('/api/engine', payoutRoutes);
+  app.use('/api', payoutRoutes);
 
   // Audit Logs
   // GET /api/audit

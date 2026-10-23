@@ -11,20 +11,28 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
   switch (status.toUpperCase()) {
     case 'ACTIVE':
     case 'SUCCESS':
+    case 'SUCCEEDED':
+    case 'PROCESSED':
+    case 'PAID':
     case 'COMPLETED':
     case 'PRIME_A':
       colorClasses = 'bg-teal-50 text-teal-700 border-teal-200/80';
       break;
     case 'STANDARD_B':
     case 'PENDING':
+    case 'RECEIVED':
     case 'RECORDED':
       colorClasses = 'bg-blue-50 text-blue-700 border-blue-200/80';
+      break;
+    case 'RETRY_PENDING':
+      colorClasses = 'bg-amber-50 text-amber-700 border-amber-200/80';
       break;
     case 'EMERGING_C':
     case 'SETTLED':
       colorClasses = 'bg-slate-100 text-slate-700 border-slate-200';
       break;
     case 'FAILED':
+    case 'REJECTED':
     case 'REVOKED':
     case 'DEFAULTED':
       colorClasses = 'bg-rose-50 text-rose-700 border-rose-200/80';
