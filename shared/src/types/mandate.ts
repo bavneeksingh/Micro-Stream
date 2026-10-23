@@ -1,4 +1,4 @@
-export type MandateStatus = 'ACTIVE' | 'PENDING_AUTH' | 'PAUSED' | 'REVOKED' | 'EXPIRED';
+export type MandateStatus = 'ACTIVE' | 'AWAITING_AUTHORIZATION' | 'PENDING_AUTH' | 'PAUSED' | 'REVOKED' | 'EXPIRED';
 
 export type MandateFrequency = 'AS_PRESENTED' | 'DAILY' | 'WEEKLY' | 'MONTHLY';
 
@@ -25,5 +25,6 @@ export interface CreateMandateRequest {
   bankAccountMasked: string;
   ifscCode: string;
   maxAmountPaise: number;
+  frequency?: MandateFrequency;
   durationMonths?: number;
 }

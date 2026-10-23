@@ -9,6 +9,7 @@ import {
   Loan,
   IssueLoanRequest,
   Repayment,
+  DebitInstruction,
   calculateDeduction,
 } from '@microstream/shared';
 import { inMemoryStore } from '../../db/in-memory-store.js';

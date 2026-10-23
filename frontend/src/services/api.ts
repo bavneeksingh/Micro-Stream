@@ -217,6 +217,40 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  // Mandates
+  getMandates: (did?: string) => {
+    const q = did ? `?did=${encodeURIComponent(did)}` : '';
+    return fetchJson<{ mandates: any[]; total: number }>(`/mandates${q}`);
+  },
+  createMandate: (payload: {
+    did: string;
+    vpa: string;
+    bankAccountMasked?: string;
+    ifscCode?: string;
+    maxAmountPaise: number;
+    frequency?: string;
+    durationMonths?: number;
+    autoApprove?: boolean;
+  }) =>
+    fetchJson<any>('/mandates', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  approveMandate: (mandateId: string) =>
+    fetchJson<any>(`/mandates/${mandateId}/approve`, {
+      method: 'POST',
+    }),
+  cancelMandate: (mandateId: string) =>
+    fetchJson<any>(`/mandates/${mandateId}/cancel`, {
+      method: 'POST',
+    }),
+
+  // One-Click Demo
+  runOneClickDemo: () =>
+    fetchJson<any>('/simulator/one-click-demo', {
+      method: 'POST',
+    }),
+
   resetDemoStore: async () => {
     try {
       return await fetchJson<any>('/stream/reset', { method: 'POST' });

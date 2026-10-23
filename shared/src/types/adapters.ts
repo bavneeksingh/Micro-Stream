@@ -59,10 +59,12 @@ export interface ILedgerAdapter {
   listRepayments(loanId?: string): Promise<Repayment[]>;
 }
 
+export type DebitScenario = 'SUCCESS' | 'INSUFFICIENT_FUNDS' | 'MANDATE_EXCEEDED' | 'TIMEOUT' | 'DUPLICATE_CALLBACK';
+
 /**
  * Adapter interface for gig platform payout events (Zomato, Swiggy, Uber).
  */
-export interface IPayoutProviderAdapter {
+export interface PayoutProviderAdapter {
   readonly isMock: boolean;
   readonly providerName: string;
 
@@ -71,17 +73,24 @@ export interface IPayoutProviderAdapter {
   listPayouts(did?: string, limit?: number): Promise<PayoutEvent[]>;
 }
 
+export type IPayoutProviderAdapter = PayoutProviderAdapter;
+
 /**
  * Adapter interface for UPI AutoPay variable e-mandate execution.
  * Mock implementation guarantees safe simulated operations without real monetary debits.
  */
-export interface IPaymentProviderAdapter {
+export interface AutoPayProviderAdapter {
   readonly isMock: boolean;
   readonly providerName: string;
 
-  createMandate(request: CreateMandateRequest): Promise<AutoPayMandate>;
+  createMandate(request: CreateMandateRequest, autoApprove?: boolean): Promise<AutoPayMandate>;
+  approveMandate(mandateId: string): Promise<AutoPayMandate>;
   getMandate(mandateId: string): Promise<AutoPayMandate | null>;
   getMandateByDid(did: string): Promise<AutoPayMandate | null>;
-  executeDebit(request: ExecuteDebitRequest): Promise<DebitResult>;
+  listMandates(did?: string): Promise<AutoPayMandate[]>;
+  executeDebit(request: ExecuteDebitRequest, scenario?: DebitScenario): Promise<DebitResult>;
   cancelMandate(mandateId: string): Promise<AutoPayMandate>;
 }
+
+export type IPaymentProviderAdapter = AutoPayProviderAdapter;
+

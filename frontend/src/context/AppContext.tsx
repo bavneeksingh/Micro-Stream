@@ -52,7 +52,8 @@ interface AppContextType {
     did: string,
     platformId: string,
     amountRupees: number,
-    failureType?: 'NONE' | 'INSUFFICIENT_FUNDS' | 'MANDATE_EXCEEDED' | 'NETWORK_ERROR'
+    failureType?: 'NONE' | 'INSUFFICIENT_FUNDS' | 'MANDATE_EXCEEDED' | 'NETWORK_ERROR',
+    customReference?: string
   ) => Promise<StreamReceipt>;
   applyForLoan: (params: {
     did: string;
@@ -63,6 +64,14 @@ interface AppContextType {
     lenderName?: string;
   }) => Promise<Loan>;
   updateMandateStatus: (mandateId: string, status: 'ACTIVE' | 'PAUSED' | 'REVOKED') => void;
+  approveMandate: (mandateId: string) => Promise<void>;
+  createMandate: (payload: {
+    did: string;
+    vpa: string;
+    maxAmountPaise: number;
+    frequency?: any;
+    autoApprove?: boolean;
+  }) => Promise<void>;
   revokeConsent: (consentId: string) => void;
   grantConsent: (grantee: string, scope: string[], purpose: string) => void;
   resetAllData: () => void;
@@ -530,7 +539,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     did: string,
     platformId: string,
     amountRupees: number,
-    failureType: 'NONE' | 'INSUFFICIENT_FUNDS' | 'MANDATE_EXCEEDED' | 'NETWORK_ERROR' = 'NONE'
+    failureType: 'NONE' | 'INSUFFICIENT_FUNDS' | 'MANDATE_EXCEEDED' | 'NETWORK_ERROR' = 'NONE',
+    customReference?: string
   ): Promise<StreamReceipt> => {
     const amountPaise = Math.round(amountRupees * 100);
     const today = new Date().toISOString().split('T')[0];
@@ -544,7 +554,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       did,
       platformId,
       amountPaise,
-      reference: `PAY-${platformId.toUpperCase()}-${Date.now().toString().slice(-6)}`,
+      reference: customReference || `PAY-${platformId.toUpperCase()}-${Date.now().toString().slice(-6)}`,
       payoutDate: today,
       detectedAt: timestamp,
       status: 'DETECTED',
@@ -872,6 +882,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setConsents((prev) => [newConsent, ...prev]);
   };
 
+  const approveMandate = async (mandateId: string) => {
+    try {
+      await api.approveMandate(mandateId);
+    } catch (err: any) {
+      console.warn('API approveMandate failed, updating locally:', err.message);
+    }
+    setMandates((prev) =>
+      prev.map((m) =>
+        m.mandateId === mandateId
+          ? { ...m, status: 'ACTIVE', authorizedAt: new Date().toISOString() }
+          : m
+      )
+    );
+  };
+
+  const createMandate = async (payload: {
+    did: string;
+    vpa: string;
+    maxAmountPaise: number;
+    frequency?: any;
+    autoApprove?: boolean;
+  }) => {
+    let newM: AutoPayMandate;
+    try {
+      newM = await api.createMandate(payload);
+    } catch (err: any) {
+      console.warn('API createMandate failed, creating locally:', err.message);
+      const mandateId = `mnd_${Math.random().toString(36).substring(2, 9)}`;
+      const now = new Date();
+      newM = {
+        mandateId,
+        umrn: `UMRN2026MOCK${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+        did: payload.did,
+        vpa: payload.vpa,
+        bankAccountMasked: 'XXXX5678',
+        ifscCode: 'SBIN0001234',
+        maxAmountPaise: payload.maxAmountPaise,
+        frequency: payload.frequency || 'AS_PRESENTED',
+        status: payload.autoApprove ? 'ACTIVE' : 'AWAITING_AUTHORIZATION',
+        startDate: now.toISOString().split('T')[0],
+        endDate: new Date(now.getFullYear() + 1, now.getMonth(), now.getDate()).toISOString().split('T')[0],
+        authorizedAt: payload.autoApprove ? now.toISOString() : undefined,
+      };
+    }
+    setMandates((prev) => [newM, ...prev]);
+  };
+
   const resetAllData = () => {
     localStorage.removeItem(STORAGE_KEY);
     setWorkers(INITIAL_WORKERS);
@@ -903,6 +960,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         simulatePayout,
         applyForLoan,
         updateMandateStatus,
+        approveMandate,
+        createMandate,
         revokeConsent,
         grantConsent,
         resetAllData,

@@ -150,6 +150,145 @@ export function createPayoutRoutes(): Router {
   // POST /api/payouts/simulate (Aliased for compatibility)
   router.post('/simulate', validateBody(simulatePayoutSchema), handleSimulatePayout);
 
+  // POST /api/simulator/one-click-demo
+  router.post('/one-click-demo', async (_req: Request, res: Response, next) => {
+    try {
+      const workerRes = await db.query(`SELECT id, did FROM worker_profiles WHERE id = 'wrk_ravi_01' LIMIT 1`);
+      const workerId = workerRes.rows[0]?.id || 'wrk_ravi_01';
+
+      const demoLoanId = 'LN-DEMO-10K';
+      // Upsert demo loan with exact balance ₹10,000 (1,000,000 paise), deduction rate 5% (500 bps)
+      await db.query(
+        `INSERT INTO loans (
+           id, worker_id, lender_id, lender_name, principal_paise, outstanding_balance_paise,
+           interest_rate_bps, deduction_rate_bps, daily_cap_paise, total_repaid_paise, status, purpose, issued_at
+         ) VALUES ($1, $2, 'usr_lender_01', 'Kotak Microfinance', 1000000, 1000000, 1200, 500, 20000, 0, 'ACTIVE', 'MicroStream 1-Click Verification Demo Loan', '2020-01-01 00:00:00+00')
+         ON CONFLICT (id) DO UPDATE SET
+           outstanding_balance_paise = 1000000,
+           total_repaid_paise = 0,
+           status = 'ACTIVE',
+           deduction_rate_bps = 500,
+           issued_at = '2020-01-01 00:00:00+00'`,
+        [demoLoanId, workerId]
+      );
+
+      const initialBalancePaise = 1000000; // ₹10,000.00
+      const payoutAmountPaise = 100000;    // ₹1,000.00
+      const expectedDeductionPaise = 5000; // ₹50.00
+      const expectedBalanceAfterPaise = 995000; // ₹9,950.00
+
+      const demoRef = `PAY-DEMO-ONECLICK-${Date.now()}`;
+
+      // Step 1: Successful AutoPay Debit
+      const run1Receipt = await repaymentEngine.processPayout({
+        workerId,
+        amountPaise: payoutAmountPaise,
+        reference: demoRef,
+        platformId: 'zomato-in',
+        failureType: 'NONE',
+        autoConfirm: true,
+      });
+
+      const run1Loan = await db.query(`SELECT * FROM loans WHERE id = $1`, [demoLoanId]);
+      const balanceAfterRun1 = run1Loan.rows[0]?.outstanding_balance_paise;
+
+      const proof1Success = (
+        run1Receipt.debitInstruction?.status === 'SUCCEEDED' &&
+        run1Receipt.debitInstruction?.amountPaise === expectedDeductionPaise &&
+        balanceAfterRun1 === expectedBalanceAfterPaise
+      );
+
+      // Step 2: Replay the Same Payout (Idempotency Proof)
+      const run2Receipt = await repaymentEngine.processPayout({
+        workerId,
+        amountPaise: payoutAmountPaise,
+        reference: demoRef, // Exact same reference
+        platformId: 'zomato-in',
+        failureType: 'NONE',
+        autoConfirm: true,
+      });
+
+      const run2Loan = await db.query(`SELECT * FROM loans WHERE id = $1`, [demoLoanId]);
+      const balanceAfterRun2 = run2Loan.rows[0]?.outstanding_balance_paise;
+
+      const proof2Idempotency = (
+        run2Receipt.message.includes('Duplicate') &&
+        balanceAfterRun2 === expectedBalanceAfterPaise
+      );
+
+      // Step 3: Simulate a Failed Debit (Proof that balance remains unchanged)
+      const failRef = `PAY-DEMO-FAIL-${Date.now()}`;
+      const run3Receipt = await repaymentEngine.processPayout({
+        workerId,
+        amountPaise: payoutAmountPaise,
+        reference: failRef,
+        platformId: 'swiggy-in',
+        failureType: 'INSUFFICIENT_FUNDS',
+        autoConfirm: true,
+      });
+
+      const run3Loan = await db.query(`SELECT * FROM loans WHERE id = $1`, [demoLoanId]);
+      const balanceAfterRun3 = run3Loan.rows[0]?.outstanding_balance_paise;
+
+      const proof3FailureBalancePreserved = (
+        run3Receipt.debitInstruction?.status === 'RETRY_PENDING' &&
+        balanceAfterRun3 === expectedBalanceAfterPaise
+      );
+
+      res.json({
+        success: proof1Success && proof2Idempotency && proof3FailureBalancePreserved,
+        summary: 'MicroStream 1-Click Verification Demo successfully executed.',
+        demoLoanId,
+        steps: [
+          {
+            step: 1,
+            name: 'Successful AutoPay Stream Deduction',
+            description: 'Payout ₹1,000 at 5% deduction rate on ₹10,000 loan',
+            payoutAmountPaise,
+            deductionCalculatedPaise: run1Receipt.debitInstruction?.amountPaise,
+            expectedDeductionPaise,
+            previousBalancePaise: initialBalancePaise,
+            newBalancePaise: balanceAfterRun1,
+            expectedBalancePaise: expectedBalanceAfterPaise,
+            upiRef: run1Receipt.debitInstruction?.upiRef,
+            instructionId: run1Receipt.debitInstruction?.id,
+            passed: proof1Success,
+          },
+          {
+            step: 2,
+            name: 'Idempotency Replay Verification',
+            description: 'Replayed identical payout reference. Verified no duplicate debit occurs.',
+            replayedReference: demoRef,
+            backendMessage: run2Receipt.message,
+            balanceAfterReplayPaise: balanceAfterRun2,
+            passed: proof2Idempotency,
+          },
+          {
+            step: 3,
+            name: 'Failed Debit Balance Invariance',
+            description: 'Simulated insufficient funds debit failure. Verified loan balance remains ₹9,950.',
+            failureType: 'INSUFFICIENT_FUNDS',
+            debitInstructionStatus: run3Receipt.debitInstruction?.status,
+            balanceAfterFailedDebitPaise: balanceAfterRun3,
+            passed: proof3FailureBalancePreserved,
+          },
+        ],
+        proofs: {
+          proof1Success,
+          proof2Idempotency,
+          proof3FailureBalancePreserved,
+          allPassed: proof1Success && proof2Idempotency && proof3FailureBalancePreserved,
+        },
+        audit: {
+          safetyNote: 'MOCK SIMULATION ONLY — No real bank accounts debited, no UPI PINs collected.',
+          verifiedAt: new Date().toISOString(),
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // POST /api/payments/callback (Payment confirmation/callback handler)
   router.post('/callback', validateBody(callbackSchema), async (req: Request, res: Response, next) => {
     try {
