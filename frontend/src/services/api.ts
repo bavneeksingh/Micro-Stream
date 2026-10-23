@@ -135,7 +135,20 @@ export const api = {
 
   // Lender & Portfolio
   getLenderPortfolio: () => fetchJson<any>('/lender/portfolio'),
-  getLenderWorkerRisk: (workerId: string) => fetchJson<any>(`/lender/workers/${encodeURIComponent(workerId)}/risk`),
+  getLenderWorkerRisk: (workerId: string, windowDays: number = 30) =>
+    fetchJson<any>(`/lender/workers/${encodeURIComponent(workerId)}/risk?window=${windowDays}`),
+  getLenderWorkers: (params?: { search?: string; platform?: string; tier?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.search) q.set('search', params.search);
+    if (params?.platform) q.set('platform', params.platform);
+    if (params?.tier) q.set('tier', params.tier);
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return fetchJson<{ workers: any[]; total: number }>(`/lender/workers${qs}`);
+  },
+  getWorkerCashFlowAnalytics: (workerId: string, windowDays: number = 30) =>
+    fetchJson<any>(`/analytics/workers/${encodeURIComponent(workerId)}/cashflow?window=${windowDays}`),
+  getWorkerRiskAssessment: (workerId: string, windowDays: number = 30) =>
+    fetchJson<any>(`/analytics/workers/${encodeURIComponent(workerId)}/risk-assessment?window=${windowDays}`),
 
   // Payouts & Simulator
   getPayouts: (params?: { workerId?: string; status?: string; limit?: number }) => {

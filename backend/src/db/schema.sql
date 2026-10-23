@@ -45,10 +45,10 @@ CREATE TABLE IF NOT EXISTS payment_mandates (
     ifsc_code VARCHAR(16) NOT NULL,
     max_amount_paise BIGINT NOT NULL CHECK (max_amount_paise > 0),
     frequency VARCHAR(32) NOT NULL DEFAULT 'AS_PRESENTED',
-    status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
-    authorized_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    authorized_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_mandates_worker ON payment_mandates(worker_id);

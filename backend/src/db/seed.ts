@@ -273,63 +273,161 @@ export async function seedDatabase(force: boolean = false): Promise<void> {
       [c.id, c.workerId, c.grantee, c.scope, c.purpose, c.expiresAt]
     );
   }
-
-  // 6. Seed Earnings Records (14 days for each worker)
+  // 6. Seed Persisted Synthetic Earnings Records (60-Day Rolling Window)
+  // Explicitly distinguishes active earning days, genuine zero-income days, and missing data.
   for (const w of workers) {
-    for (let i = 14; i >= 1; i--) {
-      const date = new Date(Date.now() - i * 86400000).toISOString().split('T')[0];
-      const baseRupees = w.tier === 'PRIME_A' ? 1400 : 1100;
-      const variation = Math.sin(i * 1.5) * 350 + (i % 3 === 0 ? 300 : -150);
-      const grossPaise = Math.round(Math.max(400, baseRupees + variation) * 100);
-      const netPaise = Math.round(grossPaise * 0.92);
-      const ordersCount = Math.max(1, Math.round(grossPaise / 7000));
+    for (let day = 60; day >= 1; day--) {
+      const date = new Date(Date.now() - day * 86400000).toISOString().split('T')[0];
+      const platformId = w.platform.toLowerCase() + '-in';
       const ref = `${w.platform}-SETTLE-${w.id}-${date.replace(/-/g, '')}`;
 
-      await db.query(
-        `INSERT INTO earnings_records (id, worker_id, platform_id, date, gross_earnings_paise, net_earnings_paise, orders_count, reference, status, recorded_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'RECORDED', $9)
-         ON CONFLICT (reference) DO NOTHING`,
-        [
-          `ern_${w.id}_${i}`,
-          w.id,
-          w.platform.toLowerCase() + '-in',
-          date,
-          grossPaise,
-          netPaise,
-          ordersCount,
-          ref,
-          new Date(Date.now() - i * 86400000).toISOString(),
-        ]
-      );
+      let grossPaise = 0;
+      let isRecordedDay = false;
+
+      if (w.id === 'wrk_ravi_01') {
+        // STEADY EARNER: 54 active days, 2 genuine zero-income days, 4 missing days
+        if (day === 12 || day === 28 || day === 45 || day === 58) {
+          continue; // Missing data day
+        } else if (day === 20 || day === 40) {
+          grossPaise = 0; // Genuine zero-income day
+          isRecordedDay = true;
+        } else {
+          const variation = Math.sin(day * 0.4) * 200 + (day % 7 === 0 ? 250 : -50);
+          grossPaise = Math.round((1400 + variation) * 100);
+          isRecordedDay = true;
+        }
+      } else if (w.id === 'wrk_sunita_02') {
+        // MODERATE EARNER: 42 active days, 3 genuine zero-income days, 15 missing days
+        if (day % 4 === 0) {
+          continue;
+        } else if (day === 15 || day === 33 || day === 51) {
+          grossPaise = 0;
+          isRecordedDay = true;
+        } else {
+          const variation = Math.cos(day * 0.6) * 220;
+          grossPaise = Math.round((1100 + variation) * 100);
+          isRecordedDay = true;
+        }
+      } else if (w.id === 'wrk_arif_03') {
+        // HIGH VOLATILITY EARNER: 36 active days, large weekend surges (₹3,000+) vs quiet weekdays (₹400)
+        if (day % 3 === 0 && day % 2 !== 0) {
+          continue;
+        } else if (day === 18 || day === 42) {
+          grossPaise = 0;
+          isRecordedDay = true;
+        } else {
+          const isWeekend = day % 7 === 0 || day % 7 === 6;
+          const base = isWeekend ? 2800 : 750;
+          const swing = Math.sin(day * 1.2) * 450;
+          grossPaise = Math.round(Math.max(350, base + swing) * 100);
+          isRecordedDay = true;
+        }
+      } else if (w.id === 'wrk_priya_04') {
+        // SMALL SAMPLE EARNER: Only 14 active days in 60-day window
+        if (day <= 14) {
+          grossPaise = Math.round((1200 + (day % 3) * 150) * 100);
+          isRecordedDay = true;
+        } else {
+          continue;
+        }
+      } else if (w.id === 'wrk_vikram_05') {
+        // INSUFFICIENT DATA NEW WORKER: Only 4 days of history total! (< 10 threshold)
+        if (day <= 4) {
+          grossPaise = Math.round((950 + day * 100) * 100);
+          isRecordedDay = true;
+        } else {
+          continue;
+        }
+      }
+
+      if (isRecordedDay) {
+        const netPaise = Math.round(grossPaise * 0.92);
+        const ordersCount = grossPaise > 0 ? Math.max(1, Math.round(grossPaise / 7000)) : 0;
+
+        await db.query(
+          `INSERT INTO earnings_records (id, worker_id, platform_id, date, gross_earnings_paise, net_earnings_paise, orders_count, reference, status, recorded_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'RECORDED', $9)
+           ON CONFLICT (reference) DO NOTHING`,
+          [
+            `ern_${w.id}_d${day}`,
+            w.id,
+            platformId,
+            date,
+            grossPaise,
+            netPaise,
+            ordersCount,
+            ref,
+            new Date(Date.now() - day * 86400000).toISOString(),
+          ]
+        );
+      }
     }
   }
 
-  // 7. Seed Sample Debit Instructions and Repayments for Ravi Kumar
-  const repaymentsData = [
-    { id: 'rep_r_01', insId: 'ins_r_01', amount: 6750, prevBal: 910000, newBal: 903250, daysAgo: 5, upi: 'UPI/20261019/9102837101' },
-    { id: 'rep_r_02', insId: 'ins_r_02', amount: 7750, prevBal: 903250, newBal: 895500, daysAgo: 4, upi: 'UPI/20261020/9102837102' },
-    { id: 'rep_r_03', insId: 'ins_r_03', amount: 4250, prevBal: 895500, newBal: 891250, daysAgo: 3, upi: 'UPI/20261021/9102837103' },
-    { id: 'rep_r_04', insId: 'ins_r_04', amount: 8750, prevBal: 891250, newBal: 882500, daysAgo: 2, upi: 'UPI/20261022/9102837104' },
-    { id: 'rep_r_05', insId: 'ins_r_05', amount: 7000, prevBal: 882500, newBal: 875500, daysAgo: 1, upi: 'UPI/20261023/9102837105' },
+  // 7. Seed Debit Instructions & Repayments (Realistic Success vs Failed Debit Rates)
+  const debitHistory = [
+    // Ravi: 14 Success, 1 Failure = 93.3% Success Rate
+    { id: 'ins_r_01', workerId: 'wrk_ravi_01', loanId: 'LN-2026-001', amount: 7000, status: 'SUCCEEDED', daysAgo: 28, upi: 'UPI/20260926/101', hasRep: true },
+    { id: 'ins_r_02', workerId: 'wrk_ravi_01', loanId: 'LN-2026-001', amount: 6500, status: 'SUCCEEDED', daysAgo: 25, upi: 'UPI/20260929/102', hasRep: true },
+    { id: 'ins_r_03', workerId: 'wrk_ravi_01', loanId: 'LN-2026-001', amount: 8000, status: 'SUCCEEDED', daysAgo: 22, upi: 'UPI/20261002/103', hasRep: true },
+    { id: 'ins_r_04', workerId: 'wrk_ravi_01', loanId: 'LN-2026-001', amount: 7200, status: 'SUCCEEDED', daysAgo: 19, upi: 'UPI/20261005/104', hasRep: true },
+    { id: 'ins_r_05', workerId: 'wrk_ravi_01', loanId: 'LN-2026-001', amount: 6000, status: 'SUCCEEDED', daysAgo: 16, upi: 'UPI/20261008/105', hasRep: true },
+    { id: 'ins_r_06', workerId: 'wrk_ravi_01', loanId: 'LN-2026-001', amount: 7500, status: 'FAILED', daysAgo: 14, failReason: 'INSUFFICIENT_FUNDS', hasRep: false },
+    { id: 'ins_r_07', workerId: 'wrk_ravi_01', loanId: 'LN-2026-001', amount: 7500, status: 'SUCCEEDED', daysAgo: 13, upi: 'UPI/20261011/107', hasRep: true },
+    { id: 'ins_r_08', workerId: 'wrk_ravi_01', loanId: 'LN-2026-001', amount: 6800, status: 'SUCCEEDED', daysAgo: 10, upi: 'UPI/20261014/108', hasRep: true },
+    { id: 'ins_r_09', workerId: 'wrk_ravi_01', loanId: 'LN-2026-001', amount: 7100, status: 'SUCCEEDED', daysAgo: 8, upi: 'UPI/20261016/109', hasRep: true },
+    { id: 'ins_r_10', workerId: 'wrk_ravi_01', loanId: 'LN-2026-001', amount: 6750, status: 'SUCCEEDED', daysAgo: 5, upi: 'UPI/20261019/110', hasRep: true },
+    { id: 'ins_r_11', workerId: 'wrk_ravi_01', loanId: 'LN-2026-001', amount: 7750, status: 'SUCCEEDED', daysAgo: 4, upi: 'UPI/20261020/111', hasRep: true },
+    { id: 'ins_r_12', workerId: 'wrk_ravi_01', loanId: 'LN-2026-001', amount: 4250, status: 'SUCCEEDED', daysAgo: 3, upi: 'UPI/20261021/112', hasRep: true },
+    { id: 'ins_r_13', workerId: 'wrk_ravi_01', loanId: 'LN-2026-001', amount: 8750, status: 'SUCCEEDED', daysAgo: 2, upi: 'UPI/20261022/113', hasRep: true },
+    { id: 'ins_r_14', workerId: 'wrk_ravi_01', loanId: 'LN-2026-001', amount: 7000, status: 'SUCCEEDED', daysAgo: 1, upi: 'UPI/20261023/114', hasRep: true },
+
+    // Sunita: 3 Success, 2 Failure = 60%
+    { id: 'ins_s_01', workerId: 'wrk_sunita_02', loanId: 'LN-2026-002', amount: 6000, status: 'SUCCEEDED', daysAgo: 20, upi: 'UPI/20261004/201', hasRep: true },
+    { id: 'ins_s_02', workerId: 'wrk_sunita_02', loanId: 'LN-2026-002', amount: 6500, status: 'FAILED', daysAgo: 16, failReason: 'INSUFFICIENT_FUNDS', hasRep: false },
+    { id: 'ins_s_03', workerId: 'wrk_sunita_02', loanId: 'LN-2026-002', amount: 5500, status: 'SUCCEEDED', daysAgo: 12, upi: 'UPI/20261012/203', hasRep: true },
+    { id: 'ins_s_04', workerId: 'wrk_sunita_02', loanId: 'LN-2026-002', amount: 7000, status: 'FAILED', daysAgo: 7, failReason: 'PSP_TIMEOUT', hasRep: false },
+    { id: 'ins_s_05', workerId: 'wrk_sunita_02', loanId: 'LN-2026-002', amount: 6000, status: 'SUCCEEDED', daysAgo: 3, upi: 'UPI/20261021/205', hasRep: true },
+
+    // Arif (Volatile): 3 Success, 2 Failure = 60%
+    { id: 'ins_a_01', workerId: 'wrk_arif_03', loanId: 'LN-2026-003', amount: 12000, status: 'SUCCEEDED', daysAgo: 22, upi: 'UPI/20261002/301', hasRep: true },
+    { id: 'ins_a_02', workerId: 'wrk_arif_03', loanId: 'LN-2026-003', amount: 4000, status: 'FAILED', daysAgo: 18, failReason: 'INSUFFICIENT_FUNDS', hasRep: false },
+    { id: 'ins_a_03', workerId: 'wrk_arif_03', loanId: 'LN-2026-003', amount: 15000, status: 'SUCCEEDED', daysAgo: 14, upi: 'UPI/20261010/303', hasRep: true },
+    { id: 'ins_a_04', workerId: 'wrk_arif_03', loanId: 'LN-2026-003', amount: 5000, status: 'FAILED', daysAgo: 9, failReason: 'INSUFFICIENT_FUNDS', hasRep: false },
+    { id: 'ins_a_05', workerId: 'wrk_arif_03', loanId: 'LN-2026-003', amount: 14000, status: 'SUCCEEDED', daysAgo: 2, upi: 'UPI/20261022/305', hasRep: true },
   ];
 
-  for (const r of repaymentsData) {
-    const settledTime = new Date(Date.now() - r.daysAgo * 86400000).toISOString();
-    // Debit instruction
+  let runningBalance = 1000000;
+  for (const d of debitHistory) {
+    const timestamp = new Date(Date.now() - d.daysAgo * 86400000).toISOString();
     await db.query(
-      `INSERT INTO debit_instructions (id, loan_id, worker_id, amount_paise, status, idempotency_key, upi_ref, executed_at)
-       VALUES ($1, $2, $3, $4, 'SUCCESS', $5, $6, $7)
+      `INSERT INTO debit_instructions (id, loan_id, worker_id, amount_paise, status, idempotency_key, upi_ref, failure_reason, created_at, executed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (id) DO NOTHING`,
-      [r.insId, 'LN-2026-001', 'wrk_ravi_01', r.amount, `IDEM-${r.insId}`, r.upi, settledTime]
+      [
+        d.id,
+        d.loanId,
+        d.workerId,
+        d.amount,
+        d.status,
+        `IDEM-${d.id}`,
+        d.upi || null,
+        d.failReason || null,
+        timestamp,
+        d.status === 'SUCCEEDED' ? timestamp : null,
+      ]
     );
 
-    // Repayment
-    await db.query(
-      `INSERT INTO repayments (id, loan_id, debit_instruction_id, worker_id, amount_paise, previous_balance_paise, new_outstanding_balance_paise, is_final_settlement, settled_at, upi_ref)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE, $8, $9)
-       ON CONFLICT (id) DO NOTHING`,
-      [r.id, 'LN-2026-001', r.insId, 'wrk_ravi_01', r.amount, r.prevBal, r.newBal, settledTime, r.upi]
-    );
+    if (d.hasRep && d.upi) {
+      const prev = runningBalance;
+      runningBalance = Math.max(0, runningBalance - d.amount);
+      await db.query(
+        `INSERT INTO repayments (id, loan_id, debit_instruction_id, worker_id, amount_paise, previous_balance_paise, new_outstanding_balance_paise, is_final_settlement, settled_at, upi_ref)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE, $8, $9)
+         ON CONFLICT (id) DO NOTHING`,
+        [`rep_${d.id}`, d.loanId, d.id, d.workerId, d.amount, prev, runningBalance, timestamp, d.upi]
+      );
+    }
   }
 
   // 8. Seed Sample Audit Events
