@@ -14,7 +14,7 @@ import { createHealthRoutes } from './routes/health.routes.js';
 import { createMandateRoutes } from './routes/mandate.routes.js';
 import { createStreamRoutes } from './routes/stream.routes.js';
 import { createAnalyticsRoutes } from './routes/analytics.routes.js';
-import { MockLedgerAdapter } from './adapters/ledger/mock-ledger.adapter.js';
+import { getLedgerAdapter } from './adapters/ledger/index.js';
 import { MockPayoutProviderAdapter } from './adapters/payout/mock-payout.adapter.js';
 import { MockUPIAutoPayAdapter } from './adapters/payment/mock-upi-autopay.adapter.js';
 import { StreamEngineService } from './services/stream-engine.service.js';
@@ -40,8 +40,8 @@ export function createApp() {
     next();
   });
 
-  // 3. Instantiate Mock Adapters & Services (for backward compatibility & simulations)
-  const ledgerAdapter = new MockLedgerAdapter();
+  // 3. Instantiate Adapters & Services (Configurable mock vs live fabric via getLedgerAdapter)
+  const ledgerAdapter = getLedgerAdapter();
   const payoutAdapter = new MockPayoutProviderAdapter();
   const paymentAdapter = new MockUPIAutoPayAdapter();
   const streamEngine = new StreamEngineService(ledgerAdapter, payoutAdapter, paymentAdapter);

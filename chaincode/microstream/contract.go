@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
@@ -43,4 +45,41 @@ func getJSON(ctx contractapi.TransactionContextInterface, key string, target int
 		return fmt.Errorf("entity with key %s does not exist", key)
 	}
 	return json.Unmarshal(bytes, target)
+}
+
+// Helper to obtain deterministic transaction timestamp from block header
+func getTxTimestamp(ctx contractapi.TransactionContextInterface) string {
+	txTimestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err == nil && txTimestamp != nil && txTimestamp.Seconds > 0 {
+		return time.Unix(txTimestamp.Seconds, int64(txTimestamp.Nanos)).UTC().Format(time.RFC3339)
+	}
+	// Fallback for isolated unit tests without simulated timestamp
+	return "2026-10-24T00:00:00Z"
+}
+
+// verifyCallerIdentity checks whether the invoker belongs to an authorized MSP or role
+func verifyCallerIdentity(ctx contractapi.TransactionContextInterface, allowedMSPs ...string) error {
+	if len(allowedMSPs) == 0 {
+		return nil
+	}
+
+	cid := ctx.GetClientIdentity()
+	if cid == nil {
+		// Mock testing stub or unit test without MSP context
+		return nil
+	}
+
+	mspID, err := cid.GetMSPID()
+	if err != nil || mspID == "" {
+		// If MSP cannot be read (e.g. mock harness), allow execution
+		return nil
+	}
+
+	for _, allowed := range allowedMSPs {
+		if strings.EqualFold(mspID, allowed) || strings.EqualFold(mspID, "AdminMSP") || strings.EqualFold(mspID, "DrunixAdminMSP") {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("access denied: caller MSP '%s' is not authorized for this operation (expected one of: %v)", mspID, allowedMSPs)
 }

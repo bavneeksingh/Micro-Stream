@@ -20,9 +20,17 @@ export interface ILedgerAdapter {
   getWorkerDID(did: string): Promise<WorkerProfile | null>;
   grantConsent(consent: GrantConsentRequest): Promise<ConsentRecord>;
   getConsent(did: string, grantee: string): Promise<ConsentRecord | null>;
+  revokeConsent(consentId: string, did: string): Promise<ConsentRecord>;
 
   // Core Chaincode Methods (Matching README.md spec)
   logDailyEarnings(request: LogEarningsRequest): Promise<{ earningsId: string; txHash: string; blockNumber: number }>;
+  recordDebitInstruction(params: {
+    instructionId: string;
+    loanId: string;
+    did: string;
+    amountPaise: number;
+    idempotencyKey: string;
+  }): Promise<DebitInstruction>;
   calculateDeduction(loanId: string, payoutAmountPaise: number, payoutRef: string): Promise<{
     deductionPaise: number;
     instructionId: string;

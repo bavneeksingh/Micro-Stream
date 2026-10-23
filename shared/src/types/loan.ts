@@ -1,4 +1,4 @@
-export type LoanStatus = 'PENDING_APPROVAL' | 'ACTIVE' | 'SETTLED' | 'DEFAULTED' | 'CANCELLED';
+export type LoanStatus = 'PENDING_APPROVAL' | 'PENDING' | 'ACTIVE' | 'SETTLED' | 'PAID' | 'REJECTED' | 'DEFAULTED' | 'CANCELLED';
 
 export interface Loan {
   loanId: string;

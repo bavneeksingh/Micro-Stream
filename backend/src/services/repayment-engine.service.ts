@@ -374,7 +374,7 @@ export class DeterministicRepaymentEngine {
           `INSERT INTO audit_events (id, user_id, action, entity_type, entity_id, details)
            VALUES ($1, $2, $3, $4, $5, $6)`,
           [
-            `aud_${Date.now()}`,
+            `aud_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
             activeLoan.user_id || activeLoan.lender_id,
             'REPAYMENT_STREAMED',
             'REPAYMENT',

@@ -72,10 +72,28 @@ export class MockLedgerAdapter implements ILedgerAdapter {
     return null;
   }
 
+  async revokeConsent(consentId: string, did: string): Promise<ConsentRecord> {
+    const consent = inMemoryStore.consents.get(consentId);
+    if (!consent) {
+      throw new Error(`Consent record ${consentId} not found on ledger`);
+    }
+    if (consent.did !== did) {
+      throw new Error(`Consent record ${consentId} does not belong to worker ${did}`);
+    }
+
+    consent.status = 'REVOKED';
+    inMemoryStore.consents.set(consentId, consent);
+    return consent;
+  }
+
   // Core Chaincode Method: LogDailyEarnings
   async logDailyEarnings(
     request: LogEarningsRequest
   ): Promise<{ earningsId: string; txHash: string; blockNumber: number }> {
+    if (request.grossEarningsPaise < 0) {
+      throw new Error(`grossEarningsPaise must be non-negative, got ${request.grossEarningsPaise}`);
+    }
+
     // Check duplicates by did + date + reference
     for (const er of inMemoryStore.earnings.values()) {
       if (er.did === request.did && er.date === request.date && er.reference === request.reference) {
@@ -110,6 +128,43 @@ export class MockLedgerAdapter implements ILedgerAdapter {
     return { earningsId, txHash, blockNumber };
   }
 
+  // Core Chaincode Method: RecordDebitInstruction
+  async recordDebitInstruction(params: {
+    instructionId: string;
+    loanId: string;
+    did: string;
+    amountPaise: number;
+    idempotencyKey: string;
+  }): Promise<DebitInstruction> {
+    if (inMemoryStore.debitInstructions.has(params.instructionId)) {
+      throw new Error(`duplicate instruction rejected: debit instruction with ID ${params.instructionId} already exists`);
+    }
+
+    const loan = inMemoryStore.loans.get(params.loanId);
+    if (!loan) {
+      throw new Error(`Loan ${params.loanId} not found on ledger`);
+    }
+    if (loan.status !== 'ACTIVE') {
+      throw new Error(`Cannot record debit instruction against loan with status ${loan.status}`);
+    }
+
+    const instruction: DebitInstruction = {
+      instructionId: params.instructionId,
+      loanId: params.loanId,
+      did: params.did,
+      payoutId: params.idempotencyKey,
+      amountPaise: params.amountPaise,
+      status: 'PENDING',
+      idempotencyKey: params.idempotencyKey,
+      retryCount: 0,
+      maxRetries: 3,
+      createdAt: new Date().toISOString(),
+    };
+
+    inMemoryStore.debitInstructions.set(params.instructionId, instruction);
+    return instruction;
+  }
+
   // Core Chaincode Method: CalculateDeduction
   // Formula: deduction = min( payoutAmount * deductionRate, outstandingBalance, dailyCap )
   async calculateDeduction(
@@ -128,7 +183,7 @@ export class MockLedgerAdapter implements ILedgerAdapter {
       throw new Error(`Loan ${loanId} not found on ledger`);
     }
 
-    if (loan.status !== 'ACTIVE' || loan.outstandingBalancePaise <= 0) {
+    if (loan.status !== 'ACTIVE' || loan.outstandingBalancePaise <= 0 || payoutAmountPaise <= 0) {
       return {
         deductionPaise: 0,
         instructionId: '',
@@ -190,6 +245,11 @@ export class MockLedgerAdapter implements ILedgerAdapter {
       throw new Error(`Debit instruction ${params.debitInstructionId} not found`);
     }
 
+    // CRITICAL: Duplicate payment callbacks must not record a repayment twice
+    if (instruction.status === 'SUCCESS' || (instruction.status as any) === 'SUCCEEDED') {
+      throw new Error(`duplicate callback rejected: debit instruction ${params.debitInstructionId} has already been settled and credited`);
+    }
+
     const txHash = `0x${crypto.randomBytes(32).toString('hex')}`;
     const now = new Date().toISOString();
 
@@ -201,7 +261,7 @@ export class MockLedgerAdapter implements ILedgerAdapter {
 
       const isFinalSettlement = loan.outstandingBalancePaise === 0;
       if (isFinalSettlement) {
-        loan.status = 'SETTLED';
+        loan.status = 'PAID';
         loan.settledAt = now;
       }
 
