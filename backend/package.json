@@ -1,6 +1,7 @@
 {
   "name": "@microstream/backend",
   "version": "0.1.0",
+  "type": "module",
   "description": "Backend API and Streaming Integration Engine for MicroStream",
   "main": "./dist/index.js",
   "scripts": {

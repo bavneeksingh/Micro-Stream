@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { config } from '../config.js';
+import { db } from '../db/db.js';
 
 export function createHealthRoutes(
   isLedgerMock: boolean,
@@ -14,6 +15,8 @@ export function createHealthRoutes(
       timestamp: new Date().toISOString(),
       uptimeSeconds: Math.floor(process.uptime()),
       environment: config.nodeEnv,
+      database: db.isInMemory ? 'pg-mem (In-Memory PostgreSQL Engine)' : 'PostgreSQL Native',
+
       adapters: {
         ledger: {
           mode: config.ledgerAdapterMode,

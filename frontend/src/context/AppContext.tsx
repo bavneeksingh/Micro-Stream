@@ -9,6 +9,7 @@ import {
   ConsentRecord,
   DebitInstruction,
 } from '@microstream/shared';
+import { api } from '../services/api';
 
 export interface UserSession {
   id: string;
@@ -478,19 +479,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   }, [workers, loans, earnings, payouts, mandates, repayments, consents, activeWorkerDid]);
 
-  // Save current user session
+  // Save current user session and authenticate with backend
   useEffect(() => {
     localStorage.setItem('microstream_user', JSON.stringify(currentUser));
+    // Synchronize JWT authentication on backend
+    api.login(currentUser.email).catch((e) => {
+      console.warn('Backend login sync error:', e.message);
+    });
   }, [currentUser]);
 
-  // Check backend health
+  // Check backend health and sync real database state on mount
   useEffect(() => {
-    fetch('/api/health')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data && data.status === 'OK') setIsBackendConnected(true);
-      })
-      .catch(() => setIsBackendConnected(false));
+    async function initBackend() {
+      try {
+        const health = await api.getHealth();
+        if (health && health.status === 'OK') {
+          setIsBackendConnected(true);
+          await api.login(currentUser.email).catch(() => {});
+
+          const [workersData, loansData, payoutsData] = await Promise.allSettled([
+            api.getWorkers(),
+            api.getLoans(),
+            api.getPayouts(),
+          ]);
+
+          if (workersData.status === 'fulfilled' && workersData.value.workers?.length > 0) {
+            setWorkers(workersData.value.workers);
+          }
+          if (loansData.status === 'fulfilled' && loansData.value.loans?.length > 0) {
+            setLoans(loansData.value.loans);
+          }
+          if (payoutsData.status === 'fulfilled' && payoutsData.value.payouts?.length > 0) {
+            setPayouts(payoutsData.value.payouts);
+          }
+        }
+      } catch {
+        setIsBackendConnected(false);
+      }
+    }
+
+    initBackend();
   }, []);
 
   const activeWorker = workers.find((w) => w.did === activeWorkerDid) || workers[0];
@@ -567,7 +595,73 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       deductionPaise = targetLoan.dailyCapPaise;
     }
 
-    // 3. Handle Failure Injection
+    // Try executing on real PostgreSQL backend first
+    try {
+      const backendRes = await api.simulatePayout({
+        did,
+        platformId,
+        amountRupees,
+        amountPaise,
+        failureType,
+        reference: newPayout.reference,
+      });
+
+      if (backendRes) {
+        if (backendRes.updatedLoan) {
+          const updLoan: Loan = {
+            ...(targetLoan || INITIAL_LOANS[0]),
+            outstandingBalancePaise: backendRes.updatedLoan.outstandingBalancePaise,
+            totalRepaidPaise: backendRes.updatedLoan.totalRepaidPaise,
+            status: backendRes.updatedLoan.status,
+            settledAt: backendRes.updatedLoan.status === 'SETTLED' ? timestamp : undefined,
+          };
+          setLoans((prev) => prev.map((l) => (l.did === did && l.status === 'ACTIVE' ? updLoan : l)));
+        }
+
+        if (backendRes.repayment) {
+          const newRep: Repayment = {
+            id: backendRes.repayment.id,
+            loanId: backendRes.repayment.loanId,
+            debitInstructionId: backendRes.debitResult?.instructionId || `ins_${Date.now()}`,
+            did,
+            amountPaise: backendRes.repayment.amountPaise,
+            previousBalancePaise: backendRes.repayment.previousBalancePaise,
+            newOutstandingBalancePaise: backendRes.repayment.newOutstandingBalancePaise,
+            isFinalSettlement: backendRes.repayment.isFinalSettlement,
+            settledAt: backendRes.repayment.settledAt || timestamp,
+            upiRef: backendRes.repayment.upiRef,
+            txHash: backendRes.repayment.txHash || `0x${Math.random().toString(16).substring(2, 34)}`,
+          };
+          setRepayments((prev) => [newRep, ...prev]);
+        }
+
+        newPayout.status = backendRes.hasActiveLoan ? (backendRes.debitResult?.success ? 'COMPLETED' : 'FAILED') : 'SKIPPED';
+        if (backendRes.debitResult?.reason) newPayout.skipReason = backendRes.debitResult.reason;
+        setPayouts((prev) => [newPayout, ...prev]);
+
+        return {
+          payout: newPayout,
+          hasActiveLoan: backendRes.hasActiveLoan,
+          deductionCalculatedRupees: (backendRes.deductionCalculatedPaise || 0) / 100,
+          debitSuccess: backendRes.debitResult?.success ?? false,
+          upiRef: backendRes.debitResult?.upiRef,
+          updatedLoan: targetLoan ? {
+            ...targetLoan,
+            outstandingBalancePaise: backendRes.updatedLoan?.outstandingBalancePaise ?? targetLoan.outstandingBalancePaise,
+            totalRepaidPaise: backendRes.updatedLoan?.totalRepaidPaise ?? targetLoan.totalRepaidPaise,
+            status: backendRes.updatedLoan?.status ?? targetLoan.status,
+          } : undefined,
+          repayment: backendRes.repayment,
+          message: backendRes.message,
+          failureReason: backendRes.debitResult?.failureReason,
+          timestamp: backendRes.timestamp || timestamp,
+        };
+      }
+    } catch (err: any) {
+      console.warn('Real backend simulate failed, falling back to local simulation:', err.message);
+    }
+
+    // Fallback local execution if backend offline
     if (failureType === 'INSUFFICIENT_FUNDS') {
       newPayout.status = 'FAILED';
       newPayout.skipReason = 'BANK_INSUFFICIENT_FUNDS';
@@ -665,6 +759,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const loanId = `LN-2026-${String(loans.length + 1).padStart(3, '0')}`;
     const mandate = mandates.find((m) => m.did === params.did && m.status === 'ACTIVE') || mandates[0];
 
+    // Attempt backend persistence
+    try {
+      const backendLoan = await api.applyLoan({
+        amountRupees: params.amountRupees,
+        deductionRatePct: params.deductionRatePct,
+        dailyCapRupees: params.dailyCapRupees,
+        purpose: params.purpose,
+        lenderName: params.lenderName,
+      });
+
+      if (backendLoan) {
+        const createdLoan: Loan = {
+          loanId: backendLoan.id || loanId,
+          did: params.did,
+          lenderId: backendLoan.lender_id || 'lender-kotak-micro',
+          lenderName: backendLoan.lender_name || params.lenderName || 'Kotak Microfinance',
+          principalPaise: backendLoan.principal_paise || principalPaise,
+          outstandingBalancePaise: backendLoan.outstanding_balance_paise || principalPaise,
+          interestRateBps: backendLoan.interest_rate_bps || 1200,
+          deductionRateBps: backendLoan.deduction_rate_bps || Math.round(params.deductionRatePct * 100),
+          dailyCapPaise: backendLoan.daily_cap_paise || Math.round(params.dailyCapRupees * 100),
+          totalRepaidPaise: backendLoan.total_repaid_paise || 0,
+          mandateId: backendLoan.mandate_id || mandate.mandateId,
+          status: backendLoan.status || 'ACTIVE',
+          purpose: backendLoan.purpose || params.purpose,
+          issuedAt: backendLoan.issued_at || new Date().toISOString(),
+          txHash: `0x${Math.random().toString(16).substring(2, 34)}`,
+        };
+        setLoans((prev) => [createdLoan, ...prev]);
+        return createdLoan;
+      }
+    } catch (err: any) {
+      console.warn('Backend apply loan error, fallback to local state:', err.message);
+    }
+
     const newLoan: Loan = {
       loanId,
       did: params.did,
@@ -693,13 +822,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
-  const revokeConsent = (consentId: string) => {
+  const revokeConsent = async (consentId: string) => {
+    try {
+      await api.revokeConsent(consentId);
+    } catch (e: any) {
+      console.warn('Backend revoke consent failed:', e.message);
+    }
     setConsents((prev) =>
       prev.map((c) => (c.id === consentId ? { ...c, status: 'REVOKED' } : c))
     );
   };
 
-  const grantConsent = (grantee: string, scope: string[], purpose: string) => {
+  const grantConsent = async (grantee: string, scope: string[], purpose: string) => {
+    try {
+      const res = await api.grantConsent({ grantee, scope, purpose });
+      if (res) {
+        setConsents((prev) => [
+          {
+            id: res.id,
+            did: activeWorkerDid,
+            grantee: res.grantee,
+            scope: Array.isArray(res.scope) ? res.scope : [res.scope],
+            purpose: res.purpose,
+            status: res.status || 'ACTIVE',
+            grantedAt: res.granted_at || new Date().toISOString(),
+            expiresAt: res.expires_at || new Date(Date.now() + 365 * 86400000).toISOString(),
+            txHash: `0x${Math.random().toString(16).substring(2, 18)}...`,
+          },
+          ...prev,
+        ]);
+        return;
+      }
+    } catch (e: any) {
+      console.warn('Backend grant consent failed, fallback to local:', e.message);
+    }
+
     const newConsent: ConsentRecord = {
       id: `cns_${Date.now()}`,
       did: activeWorkerDid,
