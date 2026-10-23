@@ -1,4 +1,4 @@
-export type PayoutStatus = 'DETECTED' | 'STREAM_TRIGGERED' | 'COMPLETED' | 'SKIPPED';
+export type PayoutStatus = 'DETECTED' | 'STREAM_TRIGGERED' | 'COMPLETED' | 'SKIPPED' | 'FAILED';
 
 export interface PayoutEvent {
   id: string;

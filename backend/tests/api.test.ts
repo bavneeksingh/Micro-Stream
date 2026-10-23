@@ -44,6 +44,7 @@ describe('MicroStream Backend API Integration Tests', () => {
     const loanBefore = inMemoryStore.loans.get('LN-2026-001');
     expect(loanBefore).toBeDefined();
     const initialBalance = loanBefore!.outstandingBalancePaise;
+    const initialRepaid = loanBefore!.totalRepaidPaise;
 
     // Simulate daily payout of ₹1,000 (100,000 paise)
     // Deduction rate is 5% (500 bps) -> Expected deduction = 5,000 paise (₹50)
@@ -66,7 +67,7 @@ describe('MicroStream Backend API Integration Tests', () => {
     // Verify loan balance was deducted on ledger
     const loanAfter = inMemoryStore.loans.get('LN-2026-001');
     expect(loanAfter!.outstandingBalancePaise).toBe(initialBalance - 5000);
-    expect(loanAfter!.totalRepaidPaise).toBe(loanBefore!.totalRepaidPaise + 5000);
+    expect(loanAfter!.totalRepaidPaise).toBe(initialRepaid + 5000);
 
     // Verify repayment record was stored
     expect(payoutRes.body.repayment).toBeDefined();
