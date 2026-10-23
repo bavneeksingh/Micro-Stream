@@ -2,6 +2,7 @@
   "name": "microstream-monorepo",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "MicroStream — Real-Time Micro-Credit Streaming for Gig Workers",
   "workspaces": [
     "shared",
@@ -14,7 +15,8 @@
     "dev:frontend": "npm run dev -w frontend",
     "build": "npm run build -w shared && npm run build -w backend && npm run build -w frontend",
     "test": "npm run test -w shared && npm run test -w backend && npm run test -w frontend",
-    "typecheck": "npm run typecheck -w shared && npm run typecheck -w backend && npm run typecheck -w frontend"
+    "typecheck": "npm run typecheck -w shared && npm run typecheck -w backend && npm run typecheck -w frontend",
+    "reset": "node scripts/reset-dev.js"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import { db } from './db/db.js';
 import { globalRateLimiter } from './middleware/rate-limiter.js';
 import { errorHandler } from './middleware/error-handler.js';
@@ -23,7 +24,13 @@ import { RiskService } from './services/risk.service.js';
 export function createApp() {
   const app = express();
 
-  // 1. Core Middlewares
+  // 1. Security & Core Middlewares
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    })
+  );
   app.use(cors());
   app.use(express.json());
   app.use(globalRateLimiter);
